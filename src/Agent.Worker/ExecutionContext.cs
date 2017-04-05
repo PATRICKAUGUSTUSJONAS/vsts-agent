@@ -24,6 +24,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         PlanFeatures Features { get; }
         Variables Variables { get; }
         Variables TaskVariables { get; }
+        List<Variable> OutputVariables { get; }
         List<IAsyncCommandContext> AsyncCommands { get; }
         List<string> PrependPath { get; }
 
@@ -74,6 +75,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public List<SecureFile> SecureFiles { get; private set; }
         public Variables Variables { get; private set; }
         public Variables TaskVariables { get; private set; }
+        public List<Variable> OutputVariables { get; private set; }
         public bool WriteDebug { get; private set; }
         public List<string> PrependPath { get; private set; }
 
@@ -135,6 +137,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             child.Endpoints = Endpoints;
             child.SecureFiles = SecureFiles;
             child.TaskVariables = taskVariables;
+            child.OutputVariables = new List<Variable>();
             child._cancellationTokenSource = new CancellationTokenSource();
             child.WriteDebug = WriteDebug;
             child._parentExecutionContext = this;
@@ -317,6 +320,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             // Variables (constructor performs initial recursive expansion)
             List<string> warnings;
             Variables = new Variables(HostContext, message.Environment.Variables, message.Environment.MaskHints, out warnings);
+
+            // Output Variables
+            OutputVariables = new List<Variable>();
 
             // Prepend Path
             PrependPath = new List<string>();

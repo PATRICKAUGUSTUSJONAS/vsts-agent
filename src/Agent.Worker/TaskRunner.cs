@@ -150,6 +150,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Run the task.
             await handler.RunAsync();
+
+            // Set output variable.
+            if (definition.Data?.OutputVariables != null)
+            {
+                foreach(var outputVar in definition.Data.OutputVariables)
+                {
+                    var variabe = ExecutionContext.Variables.GetVariable(outputVar);
+                    ExecutionContext.OutputVariables.Add(variabe);
+                }
+            }
         }
 
         private string TranslateFilePathInput(string inputValue)
