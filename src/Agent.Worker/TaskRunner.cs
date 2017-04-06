@@ -154,10 +154,14 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             // Set output variable.
             if (definition.Data?.OutputVariables != null)
             {
-                foreach(var outputVar in definition.Data.OutputVariables)
+                try
                 {
-                    var variabe = ExecutionContext.Variables.GetVariable(outputVar);
-                    ExecutionContext.OutputVariables.Add(variabe);
+                    await ExecutionContext.PublishOutputVariables(definition.Data.OutputVariables.ToList(), ExecutionContext.CancellationToken);
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException && ExecutionContext.CancellationToken.IsCancellationRequested))
+                {
+                    ExecutionContext.Error($"Fail to publish output variable for task '{TaskInstance.DisplayName}'");
+                    throw;
                 }
             }
         }

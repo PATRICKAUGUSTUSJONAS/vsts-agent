@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Microsoft.VisualStudio.Services.Agent.Worker
 {
@@ -24,7 +25,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         PlanFeatures Features { get; }
         Variables Variables { get; }
         Variables TaskVariables { get; }
-        List<Variable> OutputVariables { get; }
         List<IAsyncCommandContext> AsyncCommands { get; }
         List<string> PrependPath { get; }
 
@@ -45,6 +45,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         void AddIssue(Issue issue);
         void Progress(int percentage, string currentOperation = null);
         void UpdateDetailTimelineRecord(TimelineRecord record);
+        Task PublishOutputVariables(List<string> variableNames, CancellationToken token);
     }
 
     public sealed class ExecutionContext : AgentService, IExecutionContext
@@ -59,8 +60,12 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private IPagingLogger _logger;
         private ISecretMasker _secretMasker;
         private IJobServerQueue _jobServerQueue;
+        private IJobServer _jobServer;
         private IExecutionContext _parentExecutionContext;
 
+        private Guid _scopeIdentifier;
+        private string _hubName;
+        private Guid _planId;
         private Guid _mainTimelineId;
         private Guid _detailTimelineId;
         private int _childExecutionContextCount = 0;
@@ -75,7 +80,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public List<SecureFile> SecureFiles { get; private set; }
         public Variables Variables { get; private set; }
         public Variables TaskVariables { get; private set; }
-        public List<Variable> OutputVariables { get; private set; }
         public bool WriteDebug { get; private set; }
         public List<string> PrependPath { get; private set; }
 
@@ -117,6 +121,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         {
             base.Initialize(hostContext);
 
+            _jobServer = HostContext.GetService<IJobServer>();
             _jobServerQueue = HostContext.GetService<IJobServerQueue>();
             _secretMasker = HostContext.GetService<ISecretMasker>();
         }
@@ -137,14 +142,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             child.Endpoints = Endpoints;
             child.SecureFiles = SecureFiles;
             child.TaskVariables = taskVariables;
-            child.OutputVariables = new List<Variable>();
             child._cancellationTokenSource = new CancellationTokenSource();
             child.WriteDebug = WriteDebug;
             child._parentExecutionContext = this;
             child.PrependPath = PrependPath;
 
             // the job timeline record is at order 1.
-            child.InitializeTimelineRecord(_mainTimelineId, recordId, _record.Id, ExecutionContextType.Task, name, _childExecutionContextCount + 2);
+            child.InitializeTimelineRecord(_scopeIdentifier, _hubName, _planId, _mainTimelineId, recordId, _record.Id, ExecutionContextType.Task, name, _childExecutionContextCount + 2);
 
             child._logger = HostContext.CreateService<IPagingLogger>();
             child._logger.Setup(_mainTimelineId, recordId);
@@ -252,6 +256,36 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             _jobServerQueue.QueueTimelineRecordUpdate(_mainTimelineId, _record);
         }
 
+        public async Task PublishOutputVariables(List<string> variableNames, CancellationToken token)
+        {
+            Trace.Entering();
+            if (variableNames == null || variableNames.Count == 0)
+            {
+                return;
+            }
+
+            IDictionary<string, VariableValue> outputVars = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in variableNames)
+            {
+                var variable = Variables.GetVariable(name);
+                if (variable == null)
+                {
+                    Trace.Info($"Output variables '{name}' doesn't exist in current context.");
+                }
+                else
+                {
+                    Trace.Info($"(Output variables) '{name}': '{variable.Value}'");
+                    outputVars[name] = new VariableValue()
+                    {
+                        Value = variable.Value,
+                        IsSecret = variable.Secret,
+                    };
+                }
+            }
+
+            await _jobServer.PublishTimelineRecordVariables(_scopeIdentifier, _hubName, _planId, _mainTimelineId, _record.Id, outputVars, token);
+        }
+
         public void UpdateDetailTimelineRecord(TimelineRecord record)
         {
             ArgUtil.NotNull(record, nameof(record));
@@ -321,9 +355,6 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             List<string> warnings;
             Variables = new Variables(HostContext, message.Environment.Variables, message.Environment.MaskHints, out warnings);
 
-            // Output Variables
-            OutputVariables = new List<Variable>();
-
             // Prepend Path
             PrependPath = new List<string>();
 
@@ -349,6 +380,9 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Job timeline record.
             InitializeTimelineRecord(
+                scopeIdentifier: message.Plan.ScopeIdentifier,
+                hubName: message.Plan.PlanType,
+                planId: message.Plan.PlanId,
                 timelineId: message.Timeline.Id,
                 timelineRecordId: message.JobId,
                 parentTimelineRecordId: null,
@@ -408,8 +442,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             _jobServerQueue.QueueFileUpload(_mainTimelineId, _record.Id, type, name, filePath, deleteSource: false);
         }
 
-        private void InitializeTimelineRecord(Guid timelineId, Guid timelineRecordId, Guid? parentTimelineRecordId, string recordType, string name, int order)
+        private void InitializeTimelineRecord(Guid scopeIdentifier, string hubName, Guid planId, Guid timelineId, Guid timelineRecordId, Guid? parentTimelineRecordId, string recordType, string name, int order)
         {
+            _scopeIdentifier = scopeIdentifier;
+            _hubName = hubName;
+            _planId = planId;
             _mainTimelineId = timelineId;
             _record.Id = timelineRecordId;
             _record.RecordType = recordType;

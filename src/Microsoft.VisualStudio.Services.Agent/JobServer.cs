@@ -21,6 +21,7 @@ namespace Microsoft.VisualStudio.Services.Agent
         Task<Timeline> CreateTimelineAsync(Guid scopeIdentifier, string hubName, Guid planId, Guid timelineId, CancellationToken cancellationToken);
         Task<List<TimelineRecord>> UpdateTimelineRecordsAsync(Guid scopeIdentifier, string hubName, Guid planId, Guid timelineId, IEnumerable<TimelineRecord> records, CancellationToken cancellationToken);
         Task RaisePlanEventAsync<T>(Guid scopeIdentifier, string hubName, Guid planId, T eventData, CancellationToken cancellationToken) where T : JobEvent;
+        Task<TimelineRecord> PublishTimelineRecordVariables(Guid scopeIdentifier, string hubName, Guid planId, Guid timelineId, Guid timelineRecordId, IDictionary<string, VariableValue> variables, CancellationToken cancellationToken);
     }
 
     public sealed class JobServer : AgentService, IJobServer
@@ -94,6 +95,12 @@ namespace Microsoft.VisualStudio.Services.Agent
         {
             CheckConnection();
             return _taskClient.RaisePlanEventAsync(scopeIdentifier, hubName, planId, eventData, cancellationToken: cancellationToken);
+        }
+
+        public Task<TimelineRecord> PublishTimelineRecordVariables(Guid scopeIdentifier, string hubName, Guid planId, Guid timelineId, Guid timelineRecordId, IDictionary<string, VariableValue> variables, CancellationToken cancellationToken)
+        {
+            CheckConnection();
+            return _taskClient.PublishTimelineRecordVariablesAsync(scopeIdentifier, hubName, planId, timelineId, timelineRecordId, variables, cancellationToken: cancellationToken);
         }
     }
 }
